@@ -71,11 +71,6 @@ func appendHostToXForwardHeader(header http.Header, host string) {
 	header.Set("X-Forwarded-For", host)
 }
 
-type Proxy struct {
-	token      string
-	authWsChan chan bool
-}
-
 func handleWsMessage(conn *websocket.Conn) {
 	for {
 		// read in a message
@@ -90,7 +85,57 @@ func handleWsMessage(conn *websocket.Conn) {
 			log.Println(err)
 			return
 		}
+	}
+}
 
+type Proxy struct {
+	token      string
+	authWsChan chan bool
+}
+
+func (p *Proxy) handleWebSocketConnection(wr http.ResponseWriter, req *http.Request) {
+	if p.authWsChan == nil {
+		p.authWsChan = make(chan bool)
+	}
+	upgrader.CheckOrigin = func(r *http.Request) bool { return true }
+
+	ws, err := upgrader.Upgrade(wr, req, nil)
+
+	ws.SetCloseHandler(func(code int, text string) error {
+		close(p.authWsChan)
+		p.authWsChan = nil
+		err := ws.Close()
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		log.Println(err)
+	}
+	go handleWsMessage(ws)
+	go func() {
+		for res := range p.authWsChan {
+			log.Println("Got msg from authChan: ", res)
+			if res == true {
+				err = ws.WriteMessage(1, []byte(AuthenticatedMsg))
+				log.Println("Sent message to ws client: ", AuthenticatedMsg)
+				if err != nil {
+					log.Println(err)
+				}
+			} else {
+				err = ws.WriteMessage(1, []byte(UnauthenticatedMsg))
+				log.Println("Sent message to ws client: ", UnauthenticatedMsg)
+				if err != nil {
+					log.Println(err)
+				}
+			}
+		}
+	}()
+	err = ws.WriteMessage(1, []byte(InitiationSuccessful))
+	log.Println("Sent message to ws client: ", InitiationSuccessful)
+	if err != nil {
+		log.Println(err)
 	}
 }
 
@@ -103,49 +148,7 @@ func (p *Proxy) ServeHTTP(wr http.ResponseWriter, req *http.Request) {
 
 	switch req.URL.Path {
 	case "/ws":
-		if p.authWsChan == nil {
-			p.authWsChan = make(chan bool)
-		}
-		upgrader.CheckOrigin = func(r *http.Request) bool { return true }
-
-		ws, err := upgrader.Upgrade(wr, req, nil)
-
-		ws.SetCloseHandler(func(code int, text string) error {
-			close(p.authWsChan)
-			p.authWsChan = nil
-			err := ws.Close()
-			if err != nil {
-				return err
-			}
-			return nil
-		})
-		if err != nil {
-			log.Println(err)
-		}
-		go handleWsMessage(ws)
-		go func() {
-			for res := range p.authWsChan {
-				log.Println("Got msg from authChan: ", res)
-				if res == true {
-					err = ws.WriteMessage(1, []byte(AuthenticatedMsg))
-					log.Println("Sent message to ws client: ", AuthenticatedMsg)
-					if err != nil {
-						log.Println(err)
-					}
-				} else {
-					err = ws.WriteMessage(1, []byte(UnauthenticatedMsg))
-					log.Println("Sent message to ws client: ", UnauthenticatedMsg)
-					if err != nil {
-						log.Println(err)
-					}
-				}
-			}
-		}()
-		err = ws.WriteMessage(1, []byte(InitiationSuccessful))
-		log.Println("Sent message to ws client: ", InitiationSuccessful)
-		if err != nil {
-			log.Println(err)
-		}
+		p.handleWebSocketConnection(wr, req)
 
 	case "/token/store":
 		if req.Method == http.MethodGet {
