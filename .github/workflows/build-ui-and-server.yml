@@ -9,6 +9,7 @@ on:
   pull_request:
     branches:
       - "master"
+      - "cypress-test-1"
     paths-ignore:
       - "docs/**"
       - "mesheryctl/**"
