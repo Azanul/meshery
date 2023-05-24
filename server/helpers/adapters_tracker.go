@@ -80,7 +80,7 @@ func (a *AdaptersTracker) DeployAdapter(ctx context.Context, adapter models.Adap
 	}
 
 	// Deploy to current platform
-	targetIP := "127.0.0.1"
+	target := "localhost"
 	switch platform {
 	case "docker":
 		cli, err := client.NewClientWithOpts(client.FromEnv)
@@ -110,7 +110,7 @@ func (a *AdaptersTracker) DeployAdapter(ctx context.Context, adapter models.Adap
 			PortBindings: nat.PortMap{
 				port: []nat.PortBinding{
 					{
-						HostIP:   targetIP,
+						HostIP:   target,
 						HostPort: portNum,
 					},
 				},
@@ -144,14 +144,14 @@ func (a *AdaptersTracker) DeployAdapter(ctx context.Context, adapter models.Adap
 			return ErrAdapterAdministration(err)
 		}
 
-		targetIP = svc.Spec.ClusterIP
+		target = svc.Spec.ExternalName
 
 	// switch to default case if the platform specified is not supported
 	default:
 		return ErrAdapterAdministration(fmt.Errorf("the platform %s is not supported currently. The supported platforms are:\ndocker\nkubernetes", platform))
 	}
 
-	adapter.Location = targetIP + ":" + adapter.Location
+	adapter.Location = target + ":" + adapter.Location
 	a.AddAdapter(ctx, adapter)
 	return nil
 }
